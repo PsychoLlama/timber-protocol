@@ -1,4 +1,70 @@
-# Compacting Causal Tree
+<div align="center">
+  <h1>Compacting Causal Tree</h1>
+  <p>
+    An algorithm for replicating an operation log peer-to-peer, supporting safe checkpointing and compaction.
+  <p>
+</div>
+
+## Overview
+
+TODO
+
+## Terminology
+
+<dl>
+  <dt>Transaction</dt>
+  <dd>An event in the operation log.</dd>
+
+  <dt>Block</dt>
+  <dd>A signed transaction with causal and actor metadata.</dd>
+</dd>
+
+## Sync Protocol
+
+There are two message types:
+
+- `Sync`: Either starts or continues a synchronization.
+- `SyncFinished`: Indicates both parties are synchronized.
+
+Synchronization happens any time you send a block to another peer. It starts by including any new blocks along with a list of hashes...
+
+```json
+[
+  "Sync",
+  {
+    "interval": 16,
+    "hashes": [
+      "<hash-1>",
+      "<hash-2>",
+      "<hash-3>",
+      "<hash-4>",
+      "<hash-5>"
+    ],
+    "blocks": [
+      "<new-block>"
+    ]
+  }
+]
+```
+
+The `interval` field defines how often a hash is captured on a linearized tree. It is a power of 2 to maximize the chance of intersection with other intervals, which is important if you maintain a cache of checksums.
+
+If there are 29 operations in the causal tree with an `interval=8`, you will have 4 hashes. Adjust the interval at runtime to optimize for size vs latency.
+
+On the receiving side, after integrating the blocks, the client confirms the incremental checksums. If all checksums match, the sync is resolved through a `SyncFinished` message.
+
+If not all checksums match, the client finds the first deviating hash, captures all blocks from the entire interval, and responds with a counter-sync.
+
+The cycle repeats until all checksums match.
+
+> Note how this algorithm would behave if someone added new blocks while synchronization was already in progress.
+
+## Related Reading
+
+Archagon's [Data Laced with History](http://archagon.net/blog/2018/03/24/data-laced-with-history/) is an absolutely genius take on CRDTs. It's a long read, but I highly recommend it.
+
+---
+
 A synchronized causal tree with federated checkpointing and safe
 compaction.
 
