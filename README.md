@@ -126,6 +126,28 @@ This solves the problem of safe compaction, but leaves open a hole: what happens
 
 ### Peer Eviction
 
+I'll explain this later, but for the sake of understanding the eviction cycle, assume that everyone in the committee contributes an equal amount. Operations are divided into "rounds", defined by the number of contributors. Say there are 15 contributors: one round is 15 operations, two rounds is 30, three is 45... you get the idea.
+
+If a contributor has been noticably silent for a predetermined number of rounds, we kick them out of the committee. This happens implicitly. There's no operation or synchronized data, it's inferred by the silence. But we still need the dance of consensus. We must be sure no one else integrated their changes, otherwise it would break the silence and the eviction would be nullified. Nobody can run compaction until we're absolutely sure they've been evicted.
+
+We can't immediately evict them, but if we wait for everyone's causal pointer to move past the silence threshold, then we're certain that everyone (minus the missing peer) agrees. It's time to remove them from the committee.
+
+Once the kicked peer notices they've been evicted (likely through write failures), they should attempt to rejoin the cluster and rebase their operations against the new compaction point.
+
+Now that covers the perspective of the peers who remain online, but what about those offline still attempting to edit? From their perspective *everyone else* went silent. They might try to evict the rest of the network. Well, that's where an exception kicks in. You can only evict a peer if at least 51% of the committee voted acknowledged the silence.
+
+That exception means that unless your partition controls the majority, you cannot evict peers, and therefore you cannot run compaction. This is a good thing. It means once you regain network connection, you still have the entire list of operations. You can integrate them upstream or rebase them after the compaction point. No data is lost.
+
+<!-- TODO: Explain case where n-1 agree but edge node dispatches before local state becomes global. -->
+
+Now I left out a part at the beginning:
+
+> I'll explain this later, but for the sake of understanding the eviction cycle, assume that everyone in the committee contributes an equal amount.
+
+The next section explains why everyone contributes equally.
+
+## Distribution of Activity
+
 TODO
 
 ## Terminology
