@@ -1,11 +1,11 @@
 <div align="center">
-  <h1>Compacting Causal Tree</h1>
+  <h1>Timber</h1>
   <p>
     An algorithm for replicating an operation log peer-to-peer, supporting safe checkpointing and compaction.
   <p>
 </div>
 
-## Overview
+## Purpose
 
 Synchronizing data between computers is a difficult problem. It's a difficult problem because it's a distributed systems problem. Updates arrive out of order, people modify the same resource concurrently, computers go offline, and edge cases lead to replica divergence and data corruption. Even databases struggle with replication, each flavor with its own disappointing tradeoffs.
 
@@ -13,9 +13,42 @@ There's an active sector of research surrounding *safe* general-purpose data rep
 
 Although some specialized algorithms have better performance, CRDTs usually cost expressiveness, increased size, and inability to delete data.
 
-This algorithm is an attempt at a general-purpose CRDT built on an operation log supporting *true delete*. The operation log allows custom events, providing the full freedom of an event-sourcing architecture, while the novel checkpointing algorithm enables safe, distributed compaction, effectively removing all CRDT metadata past the lower bound.
+Timber is an attempt at a general-purpose CRDT built on an operation log supporting *true delete*. The operation log allows custom events, providing the full freedom of an event-sourcing architecture, while the novel checkpointing algorithm enables safe, distributed compaction, effectively removing all CRDT metadata past the lower bound.
 
 The only caveat is limited offline support. If multiple peers are editing concurrently while another is offline, the offline peer may need to download and replay their events after regaining connection.
+
+## Technical Overview
+
+Timber uses a causal tree to hold the operation log. Causal trees model ordering of concurrent and sequential events. They look something like this:
+
+```
+Two concurrent editors, names "A" and "B". Both start at lamport time=1.
+
+                                       +-------+
+                                  +----> B: t5 |
+                                  |    +-------+
+                 +-------+  +-----+-+
+            +----> B: t2 +--> A: t4 |
+            |    +-------+  +-----+-+
+      +-----+-+                   |    +-------+  +-------+
+Root  | A: t1 |                   +----> A: t5 +--> B: t6 |
+      +-----+-+                        +-------+  +-------+
+            |    +-------+  +-------+
+            +----> A: t2 +--> A: t3 |
+                 +-------+  +-------+
+```
+
+The diagram shows a causal tree containing several operations. Each operation holds a reference to the last one, kind of like a linked list. We have branches because it takes time for updates to propagate through the system, and if two users append simultaneously, it creates a branch. The branches are re-joined as soon as each author learns of the other's changes.
+
+Branched operations are ordered. It doesn't matter what order we choose so long as it's consistent (Timber compares the hash IDs). In the case of the diagram, `B@2` was considered greater than `A@2`. Once `A` learned of the updates, it appended to the new branch instead of its own. A similar join happened at `B@5`.
+
+Now, because branches are ordered and each transaction references the last, we can derive a linear history:
+
+```
+A@1, A@2, A@3, B@2, A@4, B@5, A@5, B@6
+```
+
+This is the operation log.
 
 ## Terminology
 
