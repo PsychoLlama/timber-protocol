@@ -19,6 +19,8 @@ The only caveat is limited offline support. If multiple peers are editing concur
 
 ## Technical Overview
 
+### Operation Log
+
 Timber uses a causal tree to hold the operation log. Causal trees model ordering of concurrent and sequential events. They look something like this:
 
 ```
@@ -38,9 +40,11 @@ Root  | A: t1 |                   +----> A: t5 +--> B: t6 |
                  +-------+  +-------+
 ```
 
-The diagram shows a causal tree containing several operations. Each operation holds a reference to the last one, kind of like a linked list. We have branches because it takes time for updates to propagate through the system, and if two users append simultaneously, it creates a branch. The branches are re-joined as soon as each author learns of the other's changes.
+The diagram shows a causal tree containing several operations. Each operation holds a reference to the last one, kind of like a linked list. When you add an operation you always append to the most "recent" item.
 
-Branched operations are ordered. It doesn't matter what order we choose so long as it's consistent (Timber compares the hash IDs). In the case of the diagram, `B@2` was considered greater than `A@2`. Once `A` learned of the updates, it appended to the new branch instead of its own. A similar join happened at `B@5`.
+Branches happen because it takes time for updates to propagate over the network. If two people append simultaneously, obviously that creates a branch, as shown with `A@2` and `B@2`.
+
+Once each actor learns about the other and see the divergence, which branch should they consider the most "recent"? Well, it doesn't matter, it only matters that they agree. Choose a deterministic function. In the diagram `B@2` was considered more recent, so `A@4` continued there.
 
 Now, because branches are ordered and each transaction references the last, we can derive a linear history:
 
@@ -48,7 +52,41 @@ Now, because branches are ordered and each transaction references the last, we c
 A@1, A@2, A@3, B@2, A@4, B@5, A@5, B@6
 ```
 
-This is the operation log.
+This creates the operation log.
+
+Merging with other peers is as simple as a union between the two sets of operations.
+
+### Checkpointing and Compaction
+
+Checkpointing is the other piece, but it's more complex. We need a way to snapshot state at a point in time and prune out the old operations, otherwise the log grows unbounded.
+
+Imagine a simple log that naively edits a string: it has 386 `Insert` and 67 `Delete` operations with new ones arriving every second. If you don't prune the log you'll eventually run out of space, but if you throw away the old ones, how will you know if you've seen them before? Plus, string operations are order-dependant, and you just deleted the ordering.
+
+There is no way to recover. Compaction just ruined the replica.
+
+The problem is about establishing a lower bound. At some point, we expect the older updates to have propagated through the system. Nobody's building on that first operation anymore. So the question becomes, how do we all agree on a shared point in causal history? What point in the log has everyone seen?
+
+Answering that question is key. That shared point in history is the checkpoint, and any operations before it can be replaced with the state they produce. Simple enough.
+
+Unfortunately, answering that is a problem of distributed consensus. That's what makes it complicated.
+
+The obvious choice is a [vector clock](https://en.wikipedia.org/wiki/Vector_clock). If each operation includes a checksum of the tree and the last known operation, we can use the clock to establish the lower bound. Further, this information is generated deterministically from the causal tree. Given the same tree, everyone sees the same clock.
+
+```
+// Lower: 5, Upper: 7
+
+Map {
+  actor_a => [operation_6, '<tree-checksum>'],
+  actor_b => [operation_5, '<tree-checksum>'],
+  actor_c => [operation_7, '<tree-checksum>'],
+  actor_d => [operation_6, '<tree-checksum>'],
+  actor_e => [operation_7, '<tree-checksum>'],
+}
+```
+
+Sounds good in theory, but we're still missing an edge case. Establishing that global lower bound assumes our clock captures *everyone*. There could be a contributor out there who drops the lower bound to `operation_3` who's updates just haven't reached us. Running compaction up to operation #5 break our replica.
+
+We need a way to create a vector clock that's representative of every peer in the system. This brings us to the core of Timber: The Committee.
 
 ## Terminology
 
