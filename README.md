@@ -88,6 +88,46 @@ Sounds good in theory, but we're still missing an edge case. Establishing that g
 
 We need a way to create a vector clock that's representative of every peer in the system. This brings us to the core of Timber: The Committee.
 
+### The Committee
+
+Writes are restricted to a set of peers called "the committee". When you create a new dataset you are the only one in the committee, the only one allowed to write, and each operation is signed by the author's private key.
+
+```
+committee = Map {
+  dataset_creator => pub_key,
+}
+```
+
+New collaborators are added by invitation only. Invites are processed by appending an `Invite` operation to the causal tree, like so:
+
+```
+      +-------------------------+    +-------------------------+
+Root  | invite_member(pub_key1) +----> invite_member(pub_key2) |
+      +-------------------------+    +-------------------------+
+```
+
+This would add two more members to the committee.
+
+```
+committee = Map {
+  dataset_creator => pub_key,
+  invited_member1 => pub_key1,
+  invited_member2 => pub_key2,
+}
+```
+
+But those invites don't take effect yet. They're marked pending and the new collaborators still can't write. Invites are only valid after they pass the checkpoint, which if you recall from the last section, requires every peer to acknowledge the operation.
+
+The first invite happens almost instantaneously because the set of peers only contains one author, the creator. A checkpoint applies instantly and the new editor (`pub_key1`) is added to the committee. The next invite requires acknowledgement from both peers. Waiting for acknowledgement ensures everyone has time to update their vector clocks, which prevents the premature compaction problem.
+
+There are circumstances where waiting for an invitation to process isn't worth the time. You may consider allowing committee members to act as delegates, accepting writes on the behalf of others. But that is out of scope.
+
+This solves the problem of safe compaction, but leaves open a hole: what happens if someone permanently drops offline? Without another mechanism to account for it, the compaction process would halt and no new peers could be invited. This brings us to the next step, peer eviction.
+
+### Peer Eviction
+
+TODO
+
 ## Terminology
 
 <dl>
