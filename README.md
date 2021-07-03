@@ -172,24 +172,16 @@ Check this from the receiver side. If you find `n` members that would've been a 
 
 If you get a duplicate operation signed by another member, keep the one with the more similar member ID.
 
-## Terminology
-
-<dl>
-  <dt>Transaction</dt>
-  <dd>An event in the operation log.</dd>
-
-  <dt>Block</dt>
-  <dd>A signed transaction with causal and actor metadata.</dd>
-</dd>
-
 ## Sync Protocol
+
+Many parts of Timber assume local ordering of transactions during synchronization, which is to say that during sync we always get your old updates before your new ones. We should never receive a transaction without a parent. This guarantee is provided by the sync protocol. It interactively exchanges missing transactions, starting from the oldest, until both members share a causal history.
 
 There are two message types:
 
 - `Sync`: Either starts or continues a synchronization.
 - `SyncFinished`: Indicates both parties are synchronized.
 
-Synchronization happens any time you send a block to another peer. It starts by including any new blocks along with a list of hashes...
+Synchronization happens any time you send an operation to another peer. It starts by including any new operations along with a list of hashes...
 
 ```json
 [
@@ -203,8 +195,8 @@ Synchronization happens any time you send a block to another peer. It starts by 
       "<hash-4>",
       "<hash-5>"
     ],
-    "blocks": [
-      "<new-block>"
+    "operations": [
+      "<new-operation>"
     ]
   }
 ]
@@ -214,13 +206,13 @@ The `interval` field defines how often a hash is captured on a linearized tree. 
 
 If there are 29 operations in the causal tree with an `interval=8`, you will have 4 hashes. Adjust the interval at runtime to optimize for size vs latency.
 
-On the receiving side, after integrating the blocks, the client confirms the incremental checksums. If all checksums match, the sync is resolved through a `SyncFinished` message.
+On the receiving side, after integrating the transactions, the client confirms the incremental checksums. If all checksums match, the sync is resolved through a `SyncFinished` message.
 
-If not all checksums match, the client finds the first deviating hash, captures all blocks from the entire interval, and responds with a counter-sync.
+If not all checksums match, the client finds the first deviating hash, captures all transactions from the entire interval, and responds with a counter-sync.
 
 The cycle repeats until all checksums match.
 
-> Note how this algorithm would behave if someone added new blocks while synchronization was already in progress.
+> Note how this algorithm would behave if someone added new transactions while synchronization was already in progress.
 
 ## Related Reading
 
