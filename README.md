@@ -224,3 +224,7 @@ The name is derived from the idea of a forest of (causal) trees, implementing ev
 > used interjectionally to warn of a falling tree 
 
 If you found this document useful or interesting, give it a star.
+
+## License
+
+[CC-BY-SA-4.0](https://creativecommons.org/licenses/by-sa/4.0/legalcode)
