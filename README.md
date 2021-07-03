@@ -158,7 +158,19 @@ That exception means that unless your partition controls the majority, you canno
 
 ## Distribution of Activity
 
-TODO
+Remember the assumption from the last section?
+
+> assume everyone in the committee contributes an equal amount (the mechanism will be explained later)
+
+Here's why: Transactions are processed by the committee member who's ID most closely matches the operation. But that's a loaded statement. How do you determine the closest ID? Well, each operation is identified by a hash of its contents, and if you take the XOR value between the operation ID and a member ID, you get a numeric distance. It's symmetric and deterministic, and it can be checked by other participants.
+
+This ensures an equal distribution of work that scales dynamically with the committee and reveals patterns in inactivity, which is the basis for peer eviction.
+
+Now unless you've got a controlled node cluster with high availability, it's unrealistic to assume everyone in the committee is always online and able to process transactions. If the member with the closest ID is offline, your operation would not be processable. That's where you can tune the system. Decide on a predetermined redundancy value, and instead of sending the operation to just one member, send it up to `n` closest members.
+
+Check this from the receiver side. If you find `n` members that would've been a better match, either reject it or forward the update to the correct members. If the sender is also in the committee then they should know better.
+
+If you get a duplicate operation signed by another member, keep the one with the more similar member ID.
 
 ## Terminology
 
