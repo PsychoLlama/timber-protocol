@@ -128,17 +128,33 @@ This solves the problem of safe compaction, but leaves open a hole: what happens
 
 For the sake of understanding the eviction cycle, assume everyone in the committee contributes an equal amount (the mechanism will be explained later). Operations are divided into "rounds", defined by the number of contributors. Say there are 15 contributors: one round is 15 operations, two rounds is 30, three is 45... you get the idea.
 
-If a contributor has been noticably silent for a predetermined number of rounds, we kick them out of the committee. This happens implicitly. There's no operation or synchronized data, it's inferred by the silence. But we still need the dance of consensus. We must be sure no one else integrated their changes, otherwise it would break the silence and the eviction would be nullified. Nobody can run compaction until we're absolutely sure they've been evicted.
+If everyone acknowledges a history where a contributor is noticeably silent for a predetermined number of rounds, they're considered inactive and the eviction phase begins.
 
-We can't immediately evict them, but if we wait for everyone's causal pointer to move past the silence threshold, then we're certain that everyone (minus the missing peer) agrees. It's time to remove them from the committee.
+It would be tempting to immediately evict the member and pass a checkpoint, but remember, not everyone crosses the checkpoint simultaneously. It would open a race condition where contributors could reach two different states:
 
-Once the kicked peer notices they've been evicted (likely through write failures), they should attempt to rejoin the cluster and rebase their operations against the new checkpoint.
+1. The silent contributor posts an update which drastically raises the lower bound, triggering a normal checkpoint.
+2. The last contributor acknowledges the silence, permanently kicking the silent member and invalidating potential updates from scenario #1.
 
-Now that covers the perspective of the peers who remain online, but what about those offline still attempting to edit? From their perspective *everyone else* went silent. They might try to evict the rest of the network. Well, that's where an exception kicks in. You can only evict a peer if at least 51% of the committee acknowledged the silence.
+If anyone integrated a change from scenario #1 before the silence was acknowledged, they would permanently diverge from the rest of the cluster. Naturally we can't let that happen, so once again we return to the dance of consensus.
 
-That exception means that unless your partition controls the majority, you cannot evict peers, and therefore you cannot run compaction. This is a good thing. It means once you regain network connection, you still have the entire list of operations. You can integrate them upstream or rebase them after the compaction point. No data is lost.
+The eviction phase is a period of suspended compaction. The silent contributor is placed on probation and requires an endorsement before their permissions are reinstated. Everyone still accepts their updates, but without an endorsement, they have no effect: they aren't counted toward a checkpoint, they aren't considered when deriving state. It's as though they weren't added at all.
 
-<!-- TODO: Explain case where n-1 agree but edge node dispatches before local state becomes global. -->
+There are two ways the eviction phase can end:
+
+1. Everyone acknowledges the silence and the inactive contributor is finally removed. Checkpoints continue normally.
+2. At least one person received an update from the silent contributor and endorsed it, nullifying the eviction. The peer is reinstated.
+
+Each member only gets one vote: acknowledge silence or submit an endorsement. Either way, the eviction will end after everyone submits their next update.
+
+Endorsements are just an extra bit of metadata attached to your typical updates. They point to another operation ID proving that the peer in question has actually been active. Any operation that doesn't include an endorsement is considered an acknowledgement of silence. If you receive an update that exonerates a supposedly inactive peer but you've already declared silence, you aren't allowed to write an endorsement. The best you can do is quickly forward it to someone else who hasn't voted yet.
+
+If the eviction is nullified by a valid endorsement, the peer is reinstated. They can submit operations again and any pending updates that were ignored by those who acknowledged silence become validated, which is to say they are counted when deriving state and computing checkpoints. On the other hand, if the peer is evicted, those pending updates can safely be purged.
+
+Endorsements and eviction phases work around the race condition by explicitly representing both cases in the protocol. The silent contributor still has a chance to redeem itself and the network still has the power to drop inactive participants.
+
+Now, all that covers the perspective of the peers who remain online, but what about those offline still attempting to edit? From their perspective *everyone else* went silent. They might try to evict the rest of the network. Well, that's where an exception kicks in. You can only evict a peer if at least 51% of the committee acknowledged the silence.
+
+That exception means that unless your partition controls the majority, you cannot evict peers, and therefore you cannot run compaction. This is a good thing. It means once you regain network connection, you still have the entire list of operations. You can integrate them upstream or rebase them after the compaction point. No data gets lost.
 
 ## Distribution of Activity
 
