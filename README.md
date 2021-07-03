@@ -54,7 +54,7 @@ A@1, A@2, A@3, B@2, A@4, B@5, A@5, B@6
 
 This creates the operation log.
 
-Merging with other peers is as simple as a union between the two sets of operations.
+Merging with other peers is as simple as a union between two sets of operations.
 
 ### Checkpointing and Compaction
 
@@ -84,7 +84,7 @@ Map {
 }
 ```
 
-Sounds good in theory, but we're still missing an edge case. Establishing that global lower bound assumes our clock captures *everyone*. There could be a contributor out there who drops the lower bound to `operation_3` who's updates just haven't reached us. Running compaction up to operation #5 break our replica.
+Sounds good in theory, but we're still missing an edge case. Establishing that global lower bound assumes our clock captures *everyone*. There could be a contributor out there who drops the lower bound to `operation_3` who's updates just haven't reached us. Running compaction up to operation #5 will break our replica.
 
 We need a way to create a vector clock that's representative of every peer in the system. This brings us to the core of Timber: The Committee.
 
@@ -120,31 +120,25 @@ But those invites don't take effect yet. They're marked pending and the new coll
 
 The first invite happens almost instantaneously because the set of peers only contains one author, the creator. A checkpoint applies instantly and the new editor (`pub_key1`) is added to the committee. The next invite requires acknowledgement from both peers. Waiting for acknowledgement ensures everyone has time to update their vector clocks, which prevents the premature compaction problem.
 
-There are circumstances where waiting for an invitation to process isn't worth the time. You may consider allowing committee members to act as delegates, accepting writes on the behalf of others. But that is out of scope.
+There are circumstances where waiting for an invitation to process isn't worth the time. You may consider allowing committee members to act in a client/server relationship, accepting writes on behalf of others. But that is out of scope.
 
 This solves the problem of safe compaction, but leaves open a hole: what happens if someone permanently drops offline? Without another mechanism to account for it, the compaction process would halt and no new peers could be invited. This brings us to the next step, peer eviction.
 
 ### Peer Eviction
 
-I'll explain this later, but for the sake of understanding the eviction cycle, assume that everyone in the committee contributes an equal amount. Operations are divided into "rounds", defined by the number of contributors. Say there are 15 contributors: one round is 15 operations, two rounds is 30, three is 45... you get the idea.
+For the sake of understanding the eviction cycle, assume everyone in the committee contributes an equal amount (the mechanism will be explained later). Operations are divided into "rounds", defined by the number of contributors. Say there are 15 contributors: one round is 15 operations, two rounds is 30, three is 45... you get the idea.
 
 If a contributor has been noticably silent for a predetermined number of rounds, we kick them out of the committee. This happens implicitly. There's no operation or synchronized data, it's inferred by the silence. But we still need the dance of consensus. We must be sure no one else integrated their changes, otherwise it would break the silence and the eviction would be nullified. Nobody can run compaction until we're absolutely sure they've been evicted.
 
 We can't immediately evict them, but if we wait for everyone's causal pointer to move past the silence threshold, then we're certain that everyone (minus the missing peer) agrees. It's time to remove them from the committee.
 
-Once the kicked peer notices they've been evicted (likely through write failures), they should attempt to rejoin the cluster and rebase their operations against the new compaction point.
+Once the kicked peer notices they've been evicted (likely through write failures), they should attempt to rejoin the cluster and rebase their operations against the new checkpoint.
 
-Now that covers the perspective of the peers who remain online, but what about those offline still attempting to edit? From their perspective *everyone else* went silent. They might try to evict the rest of the network. Well, that's where an exception kicks in. You can only evict a peer if at least 51% of the committee voted acknowledged the silence.
+Now that covers the perspective of the peers who remain online, but what about those offline still attempting to edit? From their perspective *everyone else* went silent. They might try to evict the rest of the network. Well, that's where an exception kicks in. You can only evict a peer if at least 51% of the committee acknowledged the silence.
 
 That exception means that unless your partition controls the majority, you cannot evict peers, and therefore you cannot run compaction. This is a good thing. It means once you regain network connection, you still have the entire list of operations. You can integrate them upstream or rebase them after the compaction point. No data is lost.
 
 <!-- TODO: Explain case where n-1 agree but edge node dispatches before local state becomes global. -->
-
-Now I left out a part at the beginning:
-
-> I'll explain this later, but for the sake of understanding the eviction cycle, assume that everyone in the committee contributes an equal amount.
-
-The next section explains why everyone contributes equally.
 
 ## Distribution of Activity
 
